@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🚀 Professional Automation of Checkmk Agents with Ansible
 
 This project was built to solve a real-world problem in production environments:  
@@ -33,8 +34,6 @@ ansible-vault edit inventario.ini
 # Run playbook with vault password prompt
 ansible-playbook -i inventario.ini deploy_cmk.yml --ask-vault-pass
 ````
-
-> ⚠️ Never commit your real `inventario.ini`. Use only the provided `inventario.example.ini` with fake values for GitHub.
 
 ---
 
