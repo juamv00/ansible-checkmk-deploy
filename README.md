@@ -1,0 +1,1 @@
+# ansible-checkmk-deploy
