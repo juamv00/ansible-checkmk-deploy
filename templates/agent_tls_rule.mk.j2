@@ -1,0 +1,4 @@
+# Rule created by Ansible — enables TLS for all hosts
+checkgroup_parameters.setdefault('agent_tls', [])
+if ('on', ALL_HOSTS) not in checkgroup_parameters['agent_tls']:
+    checkgroup_parameters['agent_tls'].append(('on', ALL_HOSTS))

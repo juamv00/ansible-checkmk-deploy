@@ -1,0 +1,120 @@
+# ───────────────────────────────────────────────────────────────
+# deploy_cmk.yml – Deployment of Checkmk RAW 2.4.0 agents with TLS
+# and smart plugin installation based on active services.
+# ───────────────────────────────────────────────────────────────
+- hosts: piloto
+  become: true
+  gather_facts: yes
+
+  vars:
+    # Base URLs for the agent and plugins
+    pkg_url:     "http://{{ cmk_server_ip }}:{{ cmk_server_port }}/{{ cmk_site }}/check_mk/agents/{{ cmk_pkg }}"
+    plugin_base: "http://{{ cmk_server_ip }}:{{ cmk_server_port }}/{{ cmk_site }}/check_mk/agents/plugins"
+    plugin_dir:  /usr/lib/check_mk_agent/plugins
+
+    # Local configuration files
+    filestats_cfg: /etc/check_mk/filestats.cfg
+    sudoers_cfg:   /etc/sudoers.d/cmk_sshd
+    reg_flag:      /etc/check_mk/agent/registration_successful
+
+    # Service-to-plugin mapping
+    optional_plugins:
+      smartd:       smart
+      lvm2-lvmetad: lvm
+      ssh:          mk_sshd_config
+      sshd:         mk_sshd_config
+      iptables:     mk_iptables
+      docker:       mk_docker.py
+      nginx:        nginx_status.py
+      apache2:      apache_status.py
+      httpd:        apache_status.py
+      mysqld:       mk_mysql.py
+      mariadb:      mk_mysql.py
+      postgresql:   mk_postgres.py
+      mongod:       mk_mongodb.py
+      mongodb:      mk_mongodb.py
+
+    # Python packages required by plugins
+    py_reqs:
+      mk_mysql.py:    python3-mysqldb
+      mk_postgres.py: python3-psycopg2
+      mk_mongodb.py:  python3-pymongo
+
+  tasks:
+
+    # Fix APT sources on Debian 10
+    - name: Allow APT release changes (Debian 10)
+      copy:
+        dest: /etc/apt/apt.conf.d/99allow-release
+        content: |
+          Acquire::AllowReleaseInfoChange::Suite "true";
+          Acquire::AllowReleaseInfoChange::Version "true";
+      when: ansible_distribution == 'Debian' and ansible_distribution_major_version|int == 10
+
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+        cache_valid_time: "{{ 0 if (ansible_distribution == 'Debian' and ansible_distribution_major_version|int == 10) else 86400 }}"
+
+    # Install base packages
+    - name: Install base system packages
+      package:
+        name:
+          - sudo
+          - lvm2
+          - smartmontools
+          - mtr-tiny
+          - python3-docker
+      state: present
+
+    # Download and install Checkmk agent
+    - name: Download Checkmk agent
+      get_url:
+        url: "{{ pkg_url }}"
+        dest: /tmp/checkmk-agent.deb
+        mode: '0644'
+
+    - name: Install Checkmk agent
+      apt:
+        deb: /tmp/checkmk-agent.deb
+
+    # Register agent using TLS
+    - name: Register agent with TLS
+      shell: |
+        cmk-agent-ctl register \
+          --hostname {{ inventory_hostname }} \
+          --server {{ cmk_server_ip }} \
+          --site {{ cmk_site }} \
+          --user {{ cmk_user }} \
+          --password {{ cmk_pass }} \
+          --trust-cert \
+          --force
+        touch {{ reg_flag }}
+      args:
+        creates: "{{ reg_flag }}"
+
+    # Detect running services
+    - name: Gather active services
+      service_facts:
+
+    - name: Define plugins to install
+      set_fact:
+        active_plugins: "{{ active_plugins | default([]) + [optional_plugins[item.key]] }}"
+      with_dict: "{{ ansible_facts.services }}"
+      when: item.key in optional_plugins and optional_plugins[item.key] not in (active_plugins | default([]))
+
+    # Download and install required plugins
+    - name: Download and install required plugins
+      get_url:
+        url: "{{ plugin_base }}/{{ item }}"
+        dest: "{{ plugin_dir }}/{{ item }}"
+        mode: '0755'
+      loop: "{{ active_plugins | default([]) }}"
+
+    # Install required Python packages
+    - name: Install Python packages for plugins
+      package:
+        name: "{{ py_reqs[item] }}"
+        state: present
+      when: item in py_reqs
+      loop: "{{ active_plugins | default([]) }}"
